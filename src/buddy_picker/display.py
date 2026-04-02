@@ -39,6 +39,20 @@ HAT_DISPLAY = {
 }
 
 
+def _display_width(s: str) -> int:
+    """Approximate terminal display width, accounting for wide/emoji chars."""
+    w = 0
+    for ch in s:
+        cp = ord(ch)
+        if cp > 0xFFFF or 0x1100 <= cp <= 0x115F or 0x2E80 <= cp <= 0x9FFF or \
+           0xF900 <= cp <= 0xFAFF or 0xFE10 <= cp <= 0xFE6F or 0xFF01 <= cp <= 0xFF60 or \
+           0x20000 <= cp <= 0x2FA1F:
+            w += 2
+        else:
+            w += 1
+    return w
+
+
 def c(text: str, code: str) -> str:
     """Wrap *text* in an ANSI escape sequence."""
     return f"\033[{code}m{text}\033[0m"
@@ -64,7 +78,7 @@ def display_buddy(b: dict, uid: str = "", compact: bool = False) -> None:
     print(c(f"  \u256d{'\u2500' * 40}\u256e", rc))
     title = f"{icon} {b['rarity'].upper()}"
     species_str = f"{emoji} {b['species'].upper()}"
-    padding = 40 - len(title) - len(species_str) - 2
+    padding = 40 - _display_width(title) - _display_width(species_str) - 2
     print(c(f"  \u2502 {title}{' ' * max(padding, 1)}{species_str} \u2502", rc))
 
     if b["shiny"]:
@@ -76,7 +90,8 @@ def display_buddy(b: dict, uid: str = "", compact: bool = False) -> None:
     hat_line = f"hat: {HAT_DISPLAY[b['hat']]}" if b["hat"] != "none" else ""
     eye_line = f"eye: {b['eye']}"
     info = f"{eye_line}  {hat_line}".strip()
-    print(c(f"  \u2502 {info:<39}\u2502", rc))
+    info_pad = 39 - _display_width(info)
+    print(c(f"  \u2502 {info}{' ' * max(info_pad, 0)}\u2502", rc))
 
     print(c(f"  \u2502{'\u2500' * 40}\u2502", rc))
     for name in STAT_NAMES:
