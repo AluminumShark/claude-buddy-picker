@@ -29,14 +29,16 @@ STAT_NAMES = ["DEBUGGING", "PATIENCE", "CHAOS", "WISDOM", "SNARK"]
 
 RARITY_FLOOR = {"common": 5, "uncommon": 15, "rare": 25, "epic": 35, "legendary": 50}
 
-# ── Low-level helpers ──────────────────────────────────────────────────────────
+_RARITY_TOTAL = sum(RARITY_WEIGHTS.values())
+
+# ── Cached ctypes converter for hot path ──────────────────────────────────────
+
+_c32 = ctypes.c_int32
 
 
 def _imul(a: int, b: int) -> int:
     """Emulate JavaScript Math.imul (signed 32-bit multiply)."""
-    a = ctypes.c_int32(a).value
-    b = ctypes.c_int32(b).value
-    return ctypes.c_int32((a * b) & 0xFFFFFFFF).value
+    return _c32((_c32(a).value * _c32(b).value) & 0xFFFFFFFF).value
 
 
 def _unsigned_rshift(val: int, shift: int) -> int:
@@ -49,10 +51,10 @@ def _unsigned_rshift(val: int, shift: int) -> int:
 
 def fnv1a(s: str) -> int:
     """FNV-1a 32-bit hash. Matches cli.js when running on Node / claude.exe."""
-    h = 2166136261  # FNV offset basis
+    h = 2166136261
     for ch in s:
         h ^= ord(ch)
-        h = (h * 16777619) & 0xFFFFFFFF  # FNV prime
+        h = (h * 16777619) & 0xFFFFFFFF
     return h
 
 
@@ -62,30 +64,31 @@ def fnv1a(s: str) -> int:
 class Mulberry32:
     """Mulberry32 PRNG with exact JavaScript signed-integer semantics."""
 
+    __slots__ = ("a",)
+
     def __init__(self, seed: int):
         self.a = seed & 0xFFFFFFFF
 
     def __call__(self) -> float:
-        a = ctypes.c_int32(self.a).value
-        a = ctypes.c_int32(a + 0x6D2B79F5).value
+        c = _c32
+        a = c(self.a).value
+        a = c(a + 0x6D2B79F5).value
         self.a = a & 0xFFFFFFFF
-        t = _imul(a ^ _unsigned_rshift(a, 15), 1 | a)
-        t2 = _imul(t ^ _unsigned_rshift(t, 7), 61 | t)
-        t = ctypes.c_int32(t + t2).value ^ t
-        return _unsigned_rshift(t ^ _unsigned_rshift(t, 14), 0) / 4294967296
+        t = _imul(a ^ ((a & 0xFFFFFFFF) >> 15), 1 | a)
+        t2 = _imul(t ^ ((t & 0xFFFFFFFF) >> 7), 61 | t)
+        t = c(t + t2).value ^ t
+        return ((t ^ ((t & 0xFFFFFFFF) >> 14)) & 0xFFFFFFFF) / 4294967296
 
 
 # ── Roll helpers ───────────────────────────────────────────────────────────────
 
 
 def pick(rng: Mulberry32, arr: list):
-    """Uniform random selection from *arr*."""
     return arr[int(rng() * len(arr))]
 
 
 def roll_rarity(rng: Mulberry32) -> str:
-    total = sum(RARITY_WEIGHTS.values())
-    roll = rng() * total
+    roll = rng() * _RARITY_TOTAL
     for r in RARITIES:
         roll -= RARITY_WEIGHTS[r]
         if roll < 0:
@@ -111,10 +114,7 @@ def roll_stats(rng: Mulberry32, rarity: str) -> dict[str, int]:
 
 
 def roll_full(uid: str) -> dict:
-    """Generate all buddy attributes from a userID string.
-
-    Returns dict with keys: rarity, species, eye, hat, shiny, stats.
-    """
+    """Generate all buddy attributes from a userID string."""
     rng = Mulberry32(fnv1a(uid + SALT))
     rarity = roll_rarity(rng)
     species = pick(rng, SPECIES)
@@ -123,10 +123,121 @@ def roll_full(uid: str) -> dict:
     shiny = rng() < 0.01
     stats = roll_stats(rng, rarity)
     return {
-        "rarity": rarity,
-        "species": species,
-        "eye": eye,
-        "hat": hat,
-        "shiny": shiny,
-        "stats": stats,
+        "rarity": rarity, "species": species, "eye": eye,
+        "hat": hat, "shiny": shiny, "stats": stats,
+    }
+
+
+# ── Inlined fast search function ──────────────────────────────────────────────
+
+# Pre-compute for inline use
+_RARITY_CUM = []
+_cum = 0
+for _r in RARITIES:
+    _cum += RARITY_WEIGHTS[_r]
+    _RARITY_CUM.append((_cum, _r))
+del _cum, _r
+
+_N_SPECIES = len(SPECIES)
+_N_EYES = len(EYES)
+_N_HATS = len(HATS)
+_N_STATS = len(STAT_NAMES)
+
+
+def roll_filtered(
+    uid: str, *,
+    min_rank: int = 0,
+    species: str | None = None,
+    eye: str | None = None,
+    hat: str | None = None,
+    shiny: bool = False,
+    min_stats: int | None = None,
+) -> dict | None:
+    """Inlined roll with early-exit. Returns None if filters don't match.
+
+    Uses min_rank (int) instead of min_rarity (str) to avoid dict lookup per call.
+    """
+    c = _c32
+    M = 0xFFFFFFFF
+
+    # ── Inline FNV-1a ──
+    h = 2166136261
+    for ch in uid:
+        h ^= ord(ch)
+        h = (h * 16777619) & M
+    # hash the salt too
+    for ch in SALT:
+        h ^= ord(ch)
+        h = (h * 16777619) & M
+
+    # ── Inline PRNG helper ──
+    state = h & M
+
+    def _next():
+        nonlocal state
+        a = c(state).value
+        a = c(a + 0x6D2B79F5).value
+        state = a & M
+        t = _imul(a ^ ((a & M) >> 15), 1 | a)
+        t2 = _imul(t ^ ((t & M) >> 7), 61 | t)
+        t = c(t + t2).value ^ t
+        return ((t ^ ((t & M) >> 14)) & M) / 4294967296
+
+    # ── Roll rarity ──
+    roll = _next() * _RARITY_TOTAL
+    rarity = "common"
+    rarity_rank = 0
+    for i, (cum, r) in enumerate(_RARITY_CUM):
+        if roll < cum:
+            rarity = r
+            rarity_rank = i
+            break
+    if min_rank and rarity_rank < min_rank:
+        return None
+
+    # ── Roll species ──
+    sp = SPECIES[int(_next() * _N_SPECIES)]
+    if species and sp != species:
+        return None
+
+    # ── Roll eye ──
+    ey = EYES[int(_next() * _N_EYES)]
+    if eye and ey != eye:
+        return None
+
+    # ── Roll hat ──
+    if rarity == "common":
+        ht = "none"
+    else:
+        ht = HATS[int(_next() * _N_HATS)]
+    if hat and ht != hat:
+        return None
+
+    # ── Roll shiny ──
+    sh = _next() < 0.01
+    if shiny and not sh:
+        return None
+
+    # ── Roll stats (only reached if all filters passed so far) ──
+    floor = RARITY_FLOOR[rarity]
+    peak_idx = int(_next() * _N_STATS)
+    dump_idx = int(_next() * _N_STATS)
+    while dump_idx == peak_idx:
+        dump_idx = int(_next() * _N_STATS)
+
+    stats = {}
+    for i, name in enumerate(STAT_NAMES):
+        if i == peak_idx:
+            stats[name] = min(100, floor + 50 + int(_next() * 30))
+        elif i == dump_idx:
+            stats[name] = max(1, floor - 10 + int(_next() * 15))
+        else:
+            stats[name] = floor + int(_next() * 40)
+
+    if min_stats and not all(v >= min_stats for v in stats.values()):
+        return None
+
+    return {
+        "rarity": rarity, "species": sp, "eye": ey,
+        "hat": ht, "shiny": sh, "stats": stats,
     }
