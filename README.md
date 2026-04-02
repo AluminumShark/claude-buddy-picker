@@ -22,24 +22,32 @@ uv sync
 
 ## Usage
 
+After `uv sync`, run commands with `uv run`:
+
 ```bash
 # Interactive mode - pick attributes step by step
-buddy-picker
+uv run buddy-picker
 
 # Hierarchical drill-down
-buddy-picker --hierarchical
+uv run buddy-picker --hierarchical
 
 # Direct CLI search (filters can be combined)
-buddy-picker --species dragon --rarity legendary --shiny
+uv run buddy-picker --species dragon --rarity legendary --shiny
 
 # Show your current buddy
-buddy-picker --check
+uv run buddy-picker --check
 
 # Auto-apply the first result
-buddy-picker --species cat --rarity epic --apply 1
+uv run buddy-picker --species cat --rarity epic --apply 1
 
 # Restore original userID
-buddy-picker --restore
+uv run buddy-picker --restore
+```
+
+Or run as a Python module:
+
+```bash
+uv run python -m buddy_picker --help
 ```
 
 After applying, **restart Claude Code** and run `/buddy` to see your new pet.
