@@ -29,66 +29,43 @@ def _platform_init() -> None:
 # ── Search ─────────────────────────────────────────────────────────────────────
 
 
-def _search_worker(args):
-    """Worker function for multiprocessing search."""
-    chunk_size, min_rank, species, eye, hat, shiny_req, min_stats = args
-    hits = []
-    for _ in range(chunk_size):
-        uid = secrets.token_hex(32)
-        b = roll_filtered(
-            uid, min_rank=min_rank, species=species, eye=eye,
-            hat=hat, shiny=shiny_req, min_stats=min_stats,
-        )
-        if b is not None:
-            hits.append((uid, b))
-    return hits
-
-
 def search(
     species=None, min_rarity=None, eye=None, hat=None,
     shiny=False, min_stats=None, count=5, max_iter=50_000_000,
     progress=True,
 ):
-    import multiprocessing as mp
-
     min_rank = RARITY_RANK.get(min_rarity, 0) if min_rarity else 0
-    n_workers = max(1, (mp.cpu_count() or 1))
-    chunk = max(50_000, max_iter // (n_workers * 20))
     results = []
     start = time.time()
-    total_checked = 0
+    last_report = start
 
-    worker_args = (chunk, min_rank, species, eye, hat, shiny, min_stats)
+    for i in range(max_iter):
+        uid = secrets.token_hex(32)
+        b = roll_filtered(
+            uid, min_rank=min_rank, species=species, eye=eye,
+            hat=hat, shiny=shiny, min_stats=min_stats,
+        )
+        if b is None:
+            continue
 
-    with mp.Pool(n_workers) as pool:
-        while total_checked < max_iter and len(results) < count:
-            batches = min(n_workers * 2, (max_iter - total_checked + chunk - 1) // chunk)
-            if batches <= 0:
-                break
+        results.append((uid, b))
+        if progress:
+            display_buddy(b, uid, compact=True)
 
-            for hits in pool.imap_unordered(_search_worker, [worker_args] * batches):
-                results.extend(hits)
-                total_checked += chunk
+        if len(results) >= count:
+            break
 
-                if progress and results:
-                    for uid, b in hits:
-                        display_buddy(b, uid, compact=True)
+        now = time.time()
+        if progress and now - last_report > 3:
+            elapsed = now - start
+            rate = (i + 1) / elapsed
+            print(f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)",
+                  file=sys.stderr)
+            last_report = now
 
-                if len(results) >= count:
-                    break
-
-                now = time.time()
-                if progress and now - start > 2:
-                    elapsed = now - start
-                    rate = total_checked / elapsed
-                    print(f"  ... {total_checked:,} checked ({rate:,.0f}/s, "
-                          f"{len(results)} found)", file=sys.stderr)
-
-    results = results[:count]
     elapsed = time.time() - start
     if progress:
-        print(f"\n  Searched {total_checked:,} in {elapsed:.1f}s, found {len(results)}"
-              f" ({n_workers} workers)")
+        print(f"\n  Searched {i + 1:,} in {elapsed:.1f}s, found {len(results)}")
 
     return results
 
