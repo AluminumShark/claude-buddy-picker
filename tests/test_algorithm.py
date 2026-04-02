@@ -7,8 +7,15 @@ All expected values were cross-verified against the Node.js implementation
 import pytest
 
 from buddy_picker.algorithm import (
-    EYES, HATS, RARITIES, RARITY_RANK, RARITY_WEIGHTS, SPECIES, STAT_NAMES,
-    Mulberry32, fnv1a, pick, roll_full, roll_rarity,
+    EYES,
+    HATS,
+    RARITIES,
+    RARITY_WEIGHTS,
+    SPECIES,
+    STAT_NAMES,
+    Mulberry32,
+    fnv1a,
+    roll_full,
 )
 
 

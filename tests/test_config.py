@@ -1,7 +1,5 @@
 """Tests for config read/write operations."""
 
-import json
-
 import pytest
 
 from buddy_picker import config

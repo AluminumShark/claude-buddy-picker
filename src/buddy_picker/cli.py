@@ -8,12 +8,23 @@ import sys
 import time
 
 from buddy_picker.algorithm import (
-    EYES, HATS, RARITIES, RARITY_RANK, RARITY_WEIGHTS, SPECIES, STAT_NAMES,
-    roll_filtered, roll_full,
+    EYES,
+    HATS,
+    RARITIES,
+    RARITY_RANK,
+    RARITY_WEIGHTS,
+    SPECIES,
+    roll_filtered,
+    roll_full,
 )
 from buddy_picker.config import apply_uid, get_current_uid, restore_uid
 from buddy_picker.display import (
-    HAT_DISPLAY, RARITY_COLOR, RARITY_ICON, SPECIES_EMOJI, c, display_buddy,
+    HAT_DISPLAY,
+    RARITY_COLOR,
+    RARITY_ICON,
+    SPECIES_EMOJI,
+    c,
+    display_buddy,
 )
 
 # ── Platform setup ─────────────────────────────────────────────────────────────
@@ -32,6 +43,7 @@ def _platform_init() -> None:
 def _worker_init():
     """Ignore SIGINT in workers — let the parent handle Ctrl+C."""
     import signal
+
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
@@ -42,8 +54,13 @@ def _search_chunk(args):
     for _ in range(chunk_size):
         uid = secrets.token_hex(32)
         b = roll_filtered(
-            uid, min_rank=min_rank, species=species, eye=eye,
-            hat=hat, shiny=shiny_req, min_stats=min_stats,
+            uid,
+            min_rank=min_rank,
+            species=species,
+            eye=eye,
+            hat=hat,
+            shiny=shiny_req,
+            min_stats=min_stats,
         )
         if b is not None:
             hits.append((uid, b))
@@ -59,8 +76,13 @@ def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_ite
     for i in range(max_iter):
         uid = secrets.token_hex(32)
         b = roll_filtered(
-            uid, min_rank=min_rank, species=species, eye=eye,
-            hat=hat, shiny=shiny, min_stats=min_stats,
+            uid,
+            min_rank=min_rank,
+            species=species,
+            eye=eye,
+            hat=hat,
+            shiny=shiny,
+            min_stats=min_stats,
         )
         if b is None:
             continue
@@ -74,8 +96,7 @@ def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_ite
         now = time.time()
         if progress and now - last_report > 3:
             rate = (i + 1) / (now - start)
-            print(f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)",
-                  file=sys.stderr)
+            print(f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)", file=sys.stderr)
             last_report = now
 
     elapsed = time.time() - start
@@ -85,8 +106,14 @@ def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_ite
 
 
 def search(
-    species=None, min_rarity=None, eye=None, hat=None,
-    shiny=False, min_stats=None, count=5, max_iter=50_000_000,
+    species=None,
+    min_rarity=None,
+    eye=None,
+    hat=None,
+    shiny=False,
+    min_stats=None,
+    count=5,
+    max_iter=50_000_000,
     progress=True,
 ):
     import multiprocessing as mp
@@ -96,7 +123,15 @@ def search(
 
     if n_workers <= 1:
         return _search_single(
-            min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress,
+            min_rank,
+            species,
+            eye,
+            hat,
+            shiny,
+            min_stats,
+            count,
+            max_iter,
+            progress,
         )
 
     chunk = max(20_000, max_iter // (n_workers * 20))
@@ -127,8 +162,11 @@ def search(
                     if progress and now - start > 3:
                         elapsed = now - start
                         rate = total_checked / elapsed
-                        print(f"  ... {total_checked:,} checked ({rate:,.0f}/s, "
-                              f"{len(results)} found)", file=sys.stderr)
+                        print(
+                            f"  ... {total_checked:,} checked ({rate:,.0f}/s, "
+                            f"{len(results)} found)",
+                            file=sys.stderr,
+                        )
 
             pool.terminate()
     except KeyboardInterrupt:
@@ -139,14 +177,24 @@ def search(
         if progress:
             print("  (falling back to single-process search)", file=sys.stderr)
         return _search_single(
-            min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress,
+            min_rank,
+            species,
+            eye,
+            hat,
+            shiny,
+            min_stats,
+            count,
+            max_iter,
+            progress,
         )
 
     results = results[:count]
     elapsed = time.time() - start
     if progress:
-        print(f"\n  Searched {total_checked:,} in {elapsed:.1f}s, found {len(results)}"
-              f" ({n_workers} workers)")
+        print(
+            f"\n  Searched {total_checked:,} in {elapsed:.1f}s, found {len(results)}"
+            f" ({n_workers} workers)"
+        )
 
     return results
 
@@ -182,9 +230,10 @@ def prompt_choice(label, options, allow_any=True):
 def _estimate_odds(species, min_rarity, eye, hat, shiny, min_stats):
     prob = 1.0
     if min_rarity:
-        rarity_prob = sum(
-            RARITY_WEIGHTS[r] for r in RARITIES if RARITY_RANK[r] >= RARITY_RANK[min_rarity]
-        ) / 100
+        rarity_prob = (
+            sum(RARITY_WEIGHTS[r] for r in RARITIES if RARITY_RANK[r] >= RARITY_RANK[min_rarity])
+            / 100
+        )
         prob *= rarity_prob
     if species:
         prob *= 1 / len(SPECIES)
@@ -249,8 +298,14 @@ def interactive():
     print(f"\n  {c('Searching...', '1;33')}\n")
 
     results = search(
-        species=species, min_rarity=min_rarity, eye=eye, hat=hat,
-        shiny=shiny, min_stats=min_stats, count=count, max_iter=int(max_iter),
+        species=species,
+        min_rarity=min_rarity,
+        eye=eye,
+        hat=hat,
+        shiny=shiny,
+        min_stats=min_stats,
+        count=count,
+        max_iter=int(max_iter),
     )
 
     if not results:
@@ -309,8 +364,13 @@ def hierarchical():
     print(f"  {c(odds_label, '2')}\n")
 
     results = search(
-        species=species, min_rarity=rarity, eye=eye, hat=hat,
-        shiny=shiny, count=count, max_iter=int(max_iter),
+        species=species,
+        min_rarity=rarity,
+        eye=eye,
+        hat=hat,
+        shiny=shiny,
+        count=count,
+        max_iter=int(max_iter),
     )
 
     if not results:
@@ -368,9 +428,11 @@ def _prompt_apply(results):
         shiny_tag = " shiny" if b["shiny"] else ""
         hat_tag = f" {b['hat']}" if b["hat"] != "none" else ""
         peak = max(b["stats"], key=b["stats"].get)
-        print(f"    {c(str(i), '36')}) {SPECIES_EMOJI.get(b['species'], '?')} "
-              f"{c(b['rarity'], rc)} {b['species']}{shiny_tag}"
-              f" eye={b['eye']}{hat_tag} | {peak}={b['stats'][peak]}")
+        print(
+            f"    {c(str(i), '36')}) {SPECIES_EMOJI.get(b['species'], '?')} "
+            f"{c(b['rarity'], rc)} {b['species']}{shiny_tag}"
+            f" eye={b['eye']}{hat_tag} | {peak}={b['stats'][peak]}"
+        )
 
     print(f"    {c('0', '36')}) cancel")
 
@@ -469,8 +531,14 @@ examples:
     print(f"  {c('Max:', '2')} {args.max:,} | {c('Count:', '2')} {args.count}\n")
 
     results = search(
-        species=args.species, min_rarity=args.rarity, eye=args.eye, hat=args.hat,
-        shiny=args.shiny, min_stats=args.min_stats, count=args.count, max_iter=args.max,
+        species=args.species,
+        min_rarity=args.rarity,
+        eye=args.eye,
+        hat=args.hat,
+        shiny=args.shiny,
+        min_stats=args.min_stats,
+        count=args.count,
+        max_iter=args.max,
     )
 
     if not results:

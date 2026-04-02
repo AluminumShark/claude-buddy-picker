@@ -10,9 +10,24 @@ import ctypes
 SALT = "friend-2026-401"
 
 SPECIES = [
-    "duck", "goose", "blob", "cat", "dragon", "octopus", "owl", "penguin",
-    "turtle", "snail", "ghost", "axolotl", "capybara", "cactus", "robot",
-    "rabbit", "mushroom", "chonk",
+    "duck",
+    "goose",
+    "blob",
+    "cat",
+    "dragon",
+    "octopus",
+    "owl",
+    "penguin",
+    "turtle",
+    "snail",
+    "ghost",
+    "axolotl",
+    "capybara",
+    "cactus",
+    "robot",
+    "rabbit",
+    "mushroom",
+    "chonk",
 ]
 
 RARITIES = ["common", "uncommon", "rare", "epic", "legendary"]
@@ -123,8 +138,12 @@ def roll_full(uid: str) -> dict:
     shiny = rng() < 0.01
     stats = roll_stats(rng, rarity)
     return {
-        "rarity": rarity, "species": species, "eye": eye,
-        "hat": hat, "shiny": shiny, "stats": stats,
+        "rarity": rarity,
+        "species": species,
+        "eye": eye,
+        "hat": hat,
+        "shiny": shiny,
+        "stats": stats,
     }
 
 
@@ -145,7 +164,8 @@ _N_STATS = len(STAT_NAMES)
 
 
 def roll_filtered(
-    uid: str, *,
+    uid: str,
+    *,
     min_rank: int = 0,
     species: str | None = None,
     eye: str | None = None,
@@ -237,6 +257,10 @@ def roll_filtered(
         return None
 
     return {
-        "rarity": rarity, "species": sp, "eye": ey,
-        "hat": ht, "shiny": sh, "stats": stats,
+        "rarity": rarity,
+        "species": sp,
+        "eye": ey,
+        "hat": ht,
+        "shiny": sh,
+        "stats": stats,
     }
