@@ -1,16 +1,16 @@
 # Claude Buddy Picker
 
-Re-roll your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) `/buddy` companion pet by finding a `userID` that produces your desired attributes.
+Re-roll your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) `/buddy` companion pet. Pick any species, rarity, eyes, hat, shiny, and stats you want.
 
 ## How It Works
 
-Claude Code generates your `/buddy` pet deterministically:
+Claude Code generates your `/buddy` pet deterministically from your `userID`:
 
 ```
-FNV-1a(userID + "friend-2026-401") -> Mulberry32 PRNG -> weighted rolls
+FNV-1a(userID + salt) -> Mulberry32 PRNG -> weighted attribute rolls
 ```
 
-Same `userID` always produces the same pet. This tool brute-force searches for a `userID` that yields your target combination, then writes it to `~/.claude.json`.
+Same `userID` always produces the same pet. This tool exhaustively scans all 2^32 possible PRNG seeds using [Numba](https://numba.pydata.org/) JIT compilation, then reverse-engineers a valid `userID` for each match. A full scan of 4.3 billion seeds takes about 5-10 seconds.
 
 ## Installation
 
@@ -20,37 +20,56 @@ cd claude-buddy-picker
 uv sync
 ```
 
-## Usage
+Requires Python >= 3.10 and [uv](https://docs.astral.sh/uv/).
 
-After `uv sync`, run commands with `uv run`:
+## Quick Start
+
+```bash
+# 1. Pick your buddy
+uv run buddy-picker
+
+# 2. Choose attributes interactively, select a result, confirm apply
+
+# 3. Restart Claude Code and run /buddy
+```
+
+That's it. The tool writes the new `userID` to `~/.claude.json` and removes the old companion data so Claude Code re-hatches your pet on next startup.
+
+## Usage
 
 ```bash
 # Interactive mode - pick attributes step by step
 uv run buddy-picker
 
-# Hierarchical drill-down
-uv run buddy-picker --hierarchical
+# Direct CLI search (all filters are optional and combinable)
+uv run buddy-picker --species dragon --rarity legendary --shiny --eye "✦" --hat crown
 
-# Direct CLI search (filters can be combined)
-uv run buddy-picker --species dragon --rarity legendary --shiny
+# Auto-apply the best result without prompts
+uv run buddy-picker --species chonk --rarity legendary --shiny --apply 1
+
+# Step-by-step drill-down mode
+uv run buddy-picker --hierarchical
 
 # Show your current buddy
 uv run buddy-picker --check
 
-# Auto-apply the first result
-uv run buddy-picker --species cat --rarity epic --apply 1
-
-# Restore original userID
+# Restore your original userID
 uv run buddy-picker --restore
 ```
 
-Or run as a Python module:
+## Example Output
 
-```bash
-uv run python -m buddy_picker --help
 ```
+$ uv run buddy-picker --species dragon --rarity legendary --shiny --count 3
 
-After applying, **restart Claude Code** and run `/buddy` to see your new pet.
+  Scanned 4,294,967,296 seeds in 5.6s, found 511 matches
+  ♛ LEGENDARY 🐉 dragon eye=✦ hat=crown SHINY
+    DEBUGGING:85 PATIENCE:71 CHAOS:70 WISDOM:100 SNARK:41
+    uid: b0dd1e000000000000000000000000000000000000000000000000004pvwpx0
+  ...
+
+  Total: 6.0s, 3 results
+```
 
 ## Attributes
 
@@ -76,36 +95,43 @@ After applying, **restart Claude Code** and run `/buddy` to see your new pet.
 
 `·` `✦` `×` `◉` `@` `°`
 
-### Hats (8, uniform - common always gets "none")
+### Hats (8, uniform — common always gets "none")
 
 `none` `crown` `tophat` `propeller` `halo` `wizard` `beanie` `tinyduck`
 
 ### Shiny
 
-1% chance. Purely cosmetic bragging rights.
+1% chance.
 
 ### Stats
 
-5 stats: **DEBUGGING**, **PATIENCE**, **CHAOS**, **WISDOM**, **SNARK**
+**DEBUGGING**, **PATIENCE**, **CHAOS**, **WISDOM**, **SNARK**
 
-Each buddy gets one peak stat (boosted) and one dump stat (reduced). Higher rarity = higher base values.
+Each buddy has one peak stat (boosted) and one dump stat (reduced). Higher rarity = higher floor for all stats.
 
 ## CLI Options
 
 ```
---species NAME       Filter by species
+--species NAME       Target species (duck, dragon, chonk, etc.)
 --rarity NAME        Minimum rarity (common/uncommon/rare/epic/legendary)
---eye CHAR           Eye style
+--eye CHAR           Eye style (· ✦ × ◉ @ °)
 --hat NAME           Hat type (none/crown/tophat/propeller/halo/wizard/beanie/tinyduck)
---shiny              Require shiny (1% base chance)
+--shiny              Require shiny
 --min-stats N        Require ALL stats >= N
 --count N            Number of results to find (default: 5)
---max N              Max search iterations (default: 50,000,000)
---apply N            Auto-apply the Nth result
+--apply N            Auto-apply the Nth result (no interactive prompt)
 --check              Show current buddy from ~/.claude.json
 --restore            Restore original userID from backup
---hierarchical       Step-by-step attribute selection
+--hierarchical       Step-by-step attribute selection mode
 ```
+
+## How the Search Works
+
+1. **Seed scan** — Numba JIT scans all 4,294,967,296 possible PRNG seeds (~5s on modern hardware), with early-exit filtering on rarity/species/eye/hat/shiny
+2. **FNV-1a reverse** — For each matching seed, a meet-in-the-middle algorithm constructs a 64-char hex `userID` that hashes to that seed
+3. **Apply** — Writes the `userID` to `~/.claude.json` and removes the `companion` block so Claude Code re-hatches on next launch
+
+If Numba is not installed, falls back to a slower random brute-force search.
 
 ## Development
 
@@ -114,13 +140,14 @@ git clone https://github.com/AluminumShark/claude-buddy-picker.git
 cd claude-buddy-picker
 uv sync --dev
 uv run pytest -v
+uv run ruff check src/ tests/
 ```
 
 ## Compatibility
 
 - Python >= 3.10
 - Windows, macOS, Linux
-- Claude Code >= 2.1.90 (cli.js algorithm version `friend-2026-401`)
+- Claude Code >= 2.1.90 (algorithm salt: `friend-2026-401`)
 
 ## License
 
