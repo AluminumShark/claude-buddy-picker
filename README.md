@@ -133,6 +133,42 @@ Each buddy has one peak stat (boosted) and one dump stat (reduced). Higher rarit
 
 If Numba is not installed, falls back to a slower random brute-force search.
 
+## Troubleshooting
+
+### `/buddy` didn't change after applying
+
+Claude Code reads `userID` from `~/.claude.json` to generate your buddy. If you have **multiple Claude Code installations**, the wrong one might be running.
+
+Check which `claude` binary is active:
+
+```bash
+# Windows
+where claude
+
+# macOS / Linux
+which claude
+```
+
+If you see multiple results (e.g. WinGet, npm, and pnpm), only the **pnpm version** is guaranteed to respect the `userID` field. Remove the others:
+
+```bash
+# Remove WinGet version (Windows)
+winget uninstall Anthropic.ClaudeCode
+
+# Remove npm version
+npm uninstall -g @anthropic-ai/claude-code
+```
+
+After uninstalling, verify only pnpm remains, then re-run `buddy-picker` and restart Claude Code.
+
+### Buddy shows the old pet even after apply
+
+Claude Code caches companion data in `~/.claude.json`. The tool removes the `companion` block automatically, but if it persists, delete it manually:
+
+1. Open `~/.claude.json`
+2. Remove the entire `"companion": { ... }` block
+3. Restart Claude Code and run `/buddy`
+
 ## Development
 
 ```bash
