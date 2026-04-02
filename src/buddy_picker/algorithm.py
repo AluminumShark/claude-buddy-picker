@@ -290,48 +290,86 @@ def roll_filtered(
 _FNV_INV = pow(16777619, -1, 2**32)  # modular inverse of FNV prime
 _FNV_OFFSET = 2166136261
 _FNV_PRIME = 16777619
-_MITM_CHARS = list(range(48, 58)) + list(range(97, 123))  # 0-9, a-z
+_HEX_CHARS = list(range(48, 58)) + list(range(97, 103))  # 0-9, a-f (hex only)
 _M = 0xFFFFFFFF
 
-# Build forward table once at import time (36^3 = 46656 entries, ~2MB)
-_MITM_FORWARD: dict[int, tuple[int, int, int]] = {}
-for _c0 in _MITM_CHARS:
-    _h1 = ((_FNV_OFFSET ^ _c0) * _FNV_PRIME) & _M
-    for _c1 in _MITM_CHARS:
+# Fixed 56-char hex prefix (looks like a real SHA-256 hash)
+_UID_PREFIX = "b0dd1e00000000000000000000000000000000000000000000000000"
+
+# Precompute hash state after processing the prefix
+_PREFIX_HASH = fnv1a(_UID_PREFIX)
+
+# Build forward table: 4 hex chars from _PREFIX_HASH → h4
+# 16^4 = 65536 entries
+_MITM_FORWARD: dict[int, tuple[int, int, int, int]] = {}
+for _c0 in _HEX_CHARS:
+    _h1 = ((_PREFIX_HASH ^ _c0) * _FNV_PRIME) & _M
+    for _c1 in _HEX_CHARS:
         _h2 = ((_h1 ^ _c1) * _FNV_PRIME) & _M
-        for _c2 in _MITM_CHARS:
+        for _c2 in _HEX_CHARS:
             _h3 = ((_h2 ^ _c2) * _FNV_PRIME) & _M
-            _MITM_FORWARD[_h3] = (_c0, _c1, _c2)
-del _c0, _c1, _c2, _h1, _h2, _h3
+            for _c3 in _HEX_CHARS:
+                _h4 = ((_h3 ^ _c3) * _FNV_PRIME) & _M
+                _MITM_FORWARD[_h4] = (_c0, _c1, _c2, _c3)
+del _c0, _c1, _c2, _c3, _h1, _h2, _h3, _h4
 
 
 def reverse_fnv1a(target_seed: int) -> str | None:
-    """Construct a userID string such that fnv1a(uid + SALT) == target_seed.
+    """Construct a 64-char hex userID such that fnv1a(uid + SALT) == target_seed.
 
-    Uses meet-in-the-middle: 3-char forward table + 4-char reverse search.
-    Returns a 7-character alphanumeric string, or None if no match found.
+    Uses meet-in-the-middle: 56-char fixed prefix + 4-char forward + 4-char reverse.
+    Returns a 64-character hex string matching Claude Code's expected format.
     """
     INV = _FNV_INV
     M = _M
 
-    # Step 1: reverse the SALT to find what fnv1a(uid) must equal
+    # Reverse the SALT to find what fnv1a(full_uid) must equal
     h = target_seed
     for ch in reversed(SALT):
         h = (h * INV) & M
         h ^= ord(ch)
     target_h = h
 
-    # Step 2: reverse 4 chars from target_h, look up prefix in forward table
-    for c6 in _MITM_CHARS:
-        h6 = ((target_h * INV) & M) ^ c6
-        for c5 in _MITM_CHARS:
-            h5 = ((h6 * INV) & M) ^ c5
-            for c4 in _MITM_CHARS:
-                h4 = ((h5 * INV) & M) ^ c4
-                for c3 in _MITM_CHARS:
-                    h3 = ((h4 * INV) & M) ^ c3
-                    prefix = _MITM_FORWARD.get(h3)
-                    if prefix is not None:
-                        return "".join(chr(c) for c in (*prefix, c3, c4, c5, c6))
+    # Reverse 4 hex chars from target_h, look up in forward table
+    for c7 in _HEX_CHARS:
+        h7 = ((target_h * INV) & M) ^ c7
+        for c6 in _HEX_CHARS:
+            h6 = ((h7 * INV) & M) ^ c6
+            for c5 in _HEX_CHARS:
+                h5 = ((h6 * INV) & M) ^ c5
+                for c4 in _HEX_CHARS:
+                    h4 = ((h5 * INV) & M) ^ c4
+                    fwd = _MITM_FORWARD.get(h4)
+                    if fwd is not None:
+                        suffix = "".join(chr(c) for c in (*fwd, c4, c5, c6, c7))
+                        return _UID_PREFIX + suffix
+
+    # Hex-only MITM missed (~50% coverage). Retry with wider alphanumeric charset.
+    _alnum = list(range(48, 58)) + list(range(97, 123))  # 0-9, a-z (36 values)
+    _prefix56 = _UID_PREFIX[:56]
+    _ph = fnv1a(_prefix56)
+    fwd2: dict[int, tuple[int, int, int]] = {}
+    for a0 in _alnum:
+        g1 = ((_ph ^ a0) * _FNV_PRIME) & M
+        for a1 in _alnum:
+            g2 = ((g1 ^ a1) * _FNV_PRIME) & M
+            for a2 in _alnum:
+                g3 = ((g2 ^ a2) * _FNV_PRIME) & M
+                fwd2[g3] = (a0, a1, a2)
+
+    for a7 in _alnum:
+        g7 = ((target_h * INV) & M) ^ a7
+        for a6 in _alnum:
+            g6 = ((g7 * INV) & M) ^ a6
+            for a5 in _alnum:
+                g5 = ((g6 * INV) & M) ^ a5
+                for a4 in _alnum:
+                    g4 = ((g5 * INV) & M) ^ a4
+                    for a3 in _alnum:
+                        g3 = ((g4 * INV) & M) ^ a3
+                        fb = fwd2.get(g3)
+                        if fb is not None:
+                            suffix = "".join(chr(c) for c in (*fb, a3, a4, a5, a6, a7))
+                            return _prefix56 + suffix
 
     return None
