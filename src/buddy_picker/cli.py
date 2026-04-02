@@ -50,6 +50,40 @@ def _search_chunk(args):
     return hits
 
 
+def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress):
+    """Single-process fallback search."""
+    results = []
+    start = time.time()
+    last_report = start
+
+    for i in range(max_iter):
+        uid = secrets.token_hex(32)
+        b = roll_filtered(
+            uid, min_rank=min_rank, species=species, eye=eye,
+            hat=hat, shiny=shiny, min_stats=min_stats,
+        )
+        if b is None:
+            continue
+
+        results.append((uid, b))
+        if progress:
+            display_buddy(b, uid, compact=True)
+        if len(results) >= count:
+            break
+
+        now = time.time()
+        if progress and now - last_report > 3:
+            rate = (i + 1) / (now - start)
+            print(f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)",
+                  file=sys.stderr)
+            last_report = now
+
+    elapsed = time.time() - start
+    if progress:
+        print(f"\n  Searched {i + 1:,} in {elapsed:.1f}s, found {len(results)}")
+    return results
+
+
 def search(
     species=None, min_rarity=None, eye=None, hat=None,
     shiny=False, min_stats=None, count=5, max_iter=50_000_000,
@@ -59,6 +93,12 @@ def search(
 
     min_rank = RARITY_RANK.get(min_rarity, 0) if min_rarity else 0
     n_workers = max(1, (mp.cpu_count() or 1))
+
+    if n_workers <= 1:
+        return _search_single(
+            min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress,
+        )
+
     chunk = max(20_000, max_iter // (n_workers * 20))
     results = []
     start = time.time()
@@ -93,6 +133,14 @@ def search(
             pool.terminate()
     except KeyboardInterrupt:
         print("\n  Interrupted.")
+    except OSError:
+        # Multiprocessing can fail in some environments (stdin, frozen apps).
+        # Fall back to single-process search.
+        if progress:
+            print("  (falling back to single-process search)", file=sys.stderr)
+        return _search_single(
+            min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress,
+        )
 
     results = results[:count]
     elapsed = time.time() - start

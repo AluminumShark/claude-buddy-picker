@@ -170,18 +170,17 @@ def roll_filtered(
         h ^= ord(ch)
         h = (h * 16777619) & M
 
-    # ── Inline PRNG helper ──
-    state = h & M
+    # ── Inline PRNG (no closure — avoids function-object overhead) ──
+    _st = [h & M]  # mutable container for PRNG state
 
-    def _next():
-        nonlocal state
-        a = c(state).value
-        a = c(a + 0x6D2B79F5).value
-        state = a & M
-        t = _imul(a ^ ((a & M) >> 15), 1 | a)
-        t2 = _imul(t ^ ((t & M) >> 7), 61 | t)
-        t = c(t + t2).value ^ t
-        return ((t ^ ((t & M) >> 14)) & M) / 4294967296
+    def _next(_st=_st, _c=c, _M=M):
+        a = _c(_st[0]).value
+        a = _c(a + 0x6D2B79F5).value
+        _st[0] = a & _M
+        t = _imul(a ^ ((a & _M) >> 15), 1 | a)
+        t2 = _imul(t ^ ((t & _M) >> 7), 61 | t)
+        t = _c(t + t2).value ^ t
+        return ((t ^ ((t & _M) >> 14)) & _M) / 4294967296
 
     # ── Roll rarity ──
     roll = _next() * _RARITY_TOTAL
