@@ -15,13 +15,6 @@ Same `userID` always produces the same pet. This tool brute-force searches for a
 ## Installation
 
 ```bash
-# With uv (recommended)
-uv tool install claude-buddy-picker
-
-# With pip
-pip install claude-buddy-picker
-
-# From source
 git clone https://github.com/AluminumShark/claude-buddy-picker.git
 cd claude-buddy-picker
 uv sync
