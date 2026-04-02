@@ -128,6 +128,25 @@ def roll_stats(rng: Mulberry32, rarity: str) -> dict[str, int]:
     return stats
 
 
+def roll_from_seed(seed: int) -> dict:
+    """Generate buddy attributes from a raw 32-bit PRNG seed (no FNV-1a)."""
+    rng = Mulberry32(seed)
+    rarity = roll_rarity(rng)
+    species = pick(rng, SPECIES)
+    eye = pick(rng, EYES)
+    hat = "none" if rarity == "common" else pick(rng, HATS)
+    shiny = rng() < 0.01
+    stats = roll_stats(rng, rarity)
+    return {
+        "rarity": rarity,
+        "species": species,
+        "eye": eye,
+        "hat": hat,
+        "shiny": shiny,
+        "stats": stats,
+    }
+
+
 def roll_full(uid: str) -> dict:
     """Generate all buddy attributes from a userID string."""
     rng = Mulberry32(fnv1a(uid + SALT))
@@ -264,3 +283,55 @@ def roll_filtered(
         "shiny": sh,
         "stats": stats,
     }
+
+
+# ── FNV-1a reverse (meet-in-the-middle) ──────────────────────────────────────
+
+_FNV_INV = pow(16777619, -1, 2**32)  # modular inverse of FNV prime
+_FNV_OFFSET = 2166136261
+_FNV_PRIME = 16777619
+_MITM_CHARS = list(range(48, 58)) + list(range(97, 123))  # 0-9, a-z
+_M = 0xFFFFFFFF
+
+# Build forward table once at import time (36^3 = 46656 entries, ~2MB)
+_MITM_FORWARD: dict[int, tuple[int, int, int]] = {}
+for _c0 in _MITM_CHARS:
+    _h1 = ((_FNV_OFFSET ^ _c0) * _FNV_PRIME) & _M
+    for _c1 in _MITM_CHARS:
+        _h2 = ((_h1 ^ _c1) * _FNV_PRIME) & _M
+        for _c2 in _MITM_CHARS:
+            _h3 = ((_h2 ^ _c2) * _FNV_PRIME) & _M
+            _MITM_FORWARD[_h3] = (_c0, _c1, _c2)
+del _c0, _c1, _c2, _h1, _h2, _h3
+
+
+def reverse_fnv1a(target_seed: int) -> str | None:
+    """Construct a userID string such that fnv1a(uid + SALT) == target_seed.
+
+    Uses meet-in-the-middle: 3-char forward table + 4-char reverse search.
+    Returns a 7-character alphanumeric string, or None if no match found.
+    """
+    INV = _FNV_INV
+    M = _M
+
+    # Step 1: reverse the SALT to find what fnv1a(uid) must equal
+    h = target_seed
+    for ch in reversed(SALT):
+        h = (h * INV) & M
+        h ^= ord(ch)
+    target_h = h
+
+    # Step 2: reverse 4 chars from target_h, look up prefix in forward table
+    for c6 in _MITM_CHARS:
+        h6 = ((target_h * INV) & M) ^ c6
+        for c5 in _MITM_CHARS:
+            h5 = ((h6 * INV) & M) ^ c5
+            for c4 in _MITM_CHARS:
+                h4 = ((h5 * INV) & M) ^ c4
+                for c3 in _MITM_CHARS:
+                    h3 = ((h4 * INV) & M) ^ c3
+                    prefix = _MITM_FORWARD.get(h3)
+                    if prefix is not None:
+                        return "".join(chr(c) for c in (*prefix, c3, c4, c5, c6))
+
+    return None

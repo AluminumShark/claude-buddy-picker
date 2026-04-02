@@ -14,7 +14,9 @@ from buddy_picker.algorithm import (
     RARITY_RANK,
     RARITY_WEIGHTS,
     SPECIES,
+    reverse_fnv1a,
     roll_filtered,
+    roll_from_seed,
     roll_full,
 )
 from buddy_picker.config import apply_uid, get_current_uid, restore_uid
@@ -40,35 +42,9 @@ def _platform_init() -> None:
 # ── Search ─────────────────────────────────────────────────────────────────────
 
 
-def _worker_init():
-    """Ignore SIGINT in workers — let the parent handle Ctrl+C."""
-    import signal
-
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-def _search_chunk(args):
-    """Worker: search a chunk and return hits."""
-    chunk_size, min_rank, species, eye, hat, shiny_req, min_stats = args
-    hits = []
-    for _ in range(chunk_size):
-        uid = secrets.token_hex(32)
-        b = roll_filtered(
-            uid,
-            min_rank=min_rank,
-            species=species,
-            eye=eye,
-            hat=hat,
-            shiny=shiny_req,
-            min_stats=min_stats,
-        )
-        if b is not None:
-            hits.append((uid, b))
-    return hits
-
-
-def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_iter, progress):
-    """Single-process fallback search."""
+def _search_brute_force(species, min_rarity, eye, hat, shiny, min_stats, count, max_iter, progress):
+    """Fallback brute-force search (no numba)."""
+    min_rank = RARITY_RANK.get(min_rarity, 0) if min_rarity else 0
     results = []
     start = time.time()
     last_report = start
@@ -96,12 +72,78 @@ def _search_single(min_rank, species, eye, hat, shiny, min_stats, count, max_ite
         now = time.time()
         if progress and now - last_report > 3:
             rate = (i + 1) / (now - start)
-            print(f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)", file=sys.stderr)
+            print(
+                f"  ... {i + 1:,} checked ({rate:,.0f}/s, {len(results)} found)",
+                file=sys.stderr,
+            )
             last_report = now
 
     elapsed = time.time() - start
     if progress:
         print(f"\n  Searched {i + 1:,} in {elapsed:.1f}s, found {len(results)}")
+    return results
+
+
+def _search_seed_space(species, min_rarity, eye, hat, shiny, min_stats, count, progress):
+    """Fast seed-space search using Numba JIT."""
+    from buddy_picker.fast_search import scan_seeds_range
+
+    # Convert filters to integer indices
+    rarity_cum = {
+        None: 0.0,
+        "common": 0.0,
+        "uncommon": 60.0,
+        "rare": 85.0,
+        "epic": 95.0,
+        "legendary": 99.0,
+    }
+    min_rarity_cum = rarity_cum.get(min_rarity, 0.0)
+    species_idx = SPECIES.index(species) if species else -1
+    eye_idx = EYES.index(eye) if eye else -1
+    hat_idx = HATS.index(hat) if hat else -1
+
+    if progress:
+        print("  JIT compiling (first run only)...", file=sys.stderr, flush=True)
+
+    start = time.time()
+
+    # Scan full 2^32 seed space
+    matching_seeds = scan_seeds_range(
+        0, 2**32, min_rarity_cum, species_idx, eye_idx, hat_idx, shiny
+    )
+
+    scan_time = time.time() - start
+    if progress:
+        print(
+            f"  Scanned 4,294,967,296 seeds in {scan_time:.1f}s, "
+            f"found {len(matching_seeds)} matches",
+        )
+
+    # Convert matching seeds to full buddy results with userIDs
+    results = []
+    for seed_val in matching_seeds:
+        seed = int(seed_val)
+        buddy = roll_from_seed(seed)
+
+        # Apply min_stats filter (not checked in Numba scanner)
+        if min_stats and not all(v >= min_stats for v in buddy["stats"].values()):
+            continue
+
+        uid = reverse_fnv1a(seed)
+        if uid is None:
+            continue
+
+        results.append((uid, buddy))
+        if progress:
+            display_buddy(buddy, uid, compact=True)
+
+        if len(results) >= count:
+            break
+
+    elapsed = time.time() - start
+    if progress:
+        print(f"\n  Total: {elapsed:.1f}s, {len(results)} results")
+
     return results
 
 
@@ -116,87 +158,14 @@ def search(
     max_iter=50_000_000,
     progress=True,
 ):
-    import multiprocessing as mp
-
-    min_rank = RARITY_RANK.get(min_rarity, 0) if min_rarity else 0
-    n_workers = max(1, (mp.cpu_count() or 1))
-
-    if n_workers <= 1:
-        return _search_single(
-            min_rank,
-            species,
-            eye,
-            hat,
-            shiny,
-            min_stats,
-            count,
-            max_iter,
-            progress,
-        )
-
-    chunk = max(20_000, max_iter // (n_workers * 20))
-    results = []
-    start = time.time()
-    total_checked = 0
-    worker_args = (chunk, min_rank, species, eye, hat, shiny, min_stats)
-
     try:
-        with mp.Pool(n_workers, initializer=_worker_init) as pool:
-            while total_checked < max_iter and len(results) < count:
-                n_batches = min(n_workers, (max_iter - total_checked + chunk - 1) // chunk)
-                if n_batches <= 0:
-                    break
-
-                for hits in pool.imap_unordered(_search_chunk, [worker_args] * n_batches):
-                    results.extend(hits)
-                    total_checked += chunk
-
-                    if progress:
-                        for uid, b in hits:
-                            display_buddy(b, uid, compact=True)
-
-                    if len(results) >= count:
-                        break
-
-                    now = time.time()
-                    if progress and now - start > 3:
-                        elapsed = now - start
-                        rate = total_checked / elapsed
-                        print(
-                            f"  ... {total_checked:,} checked ({rate:,.0f}/s, "
-                            f"{len(results)} found)",
-                            file=sys.stderr,
-                        )
-
-            pool.terminate()
-    except KeyboardInterrupt:
-        print("\n  Interrupted.")
-    except OSError:
-        # Multiprocessing can fail in some environments (stdin, frozen apps).
-        # Fall back to single-process search.
+        return _search_seed_space(species, min_rarity, eye, hat, shiny, min_stats, count, progress)
+    except ImportError:
         if progress:
-            print("  (falling back to single-process search)", file=sys.stderr)
-        return _search_single(
-            min_rank,
-            species,
-            eye,
-            hat,
-            shiny,
-            min_stats,
-            count,
-            max_iter,
-            progress,
+            print("  (numba not available, using brute-force fallback)", file=sys.stderr)
+        return _search_brute_force(
+            species, min_rarity, eye, hat, shiny, min_stats, count, max_iter, progress
         )
-
-    results = results[:count]
-    elapsed = time.time() - start
-    if progress:
-        print(
-            f"\n  Searched {total_checked:,} in {elapsed:.1f}s, found {len(results)}"
-            f" ({n_workers} workers)"
-        )
-
-    return results
 
 
 # ── Interactive helpers ────────────────────────────────────────────────────────

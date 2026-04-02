@@ -16,6 +16,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Games/Entertainment",
 ]
+dependencies = [
+    "numba>=0.65.0",
+]
 
 [project.scripts]
 buddy-picker = "buddy_picker.cli:main"
